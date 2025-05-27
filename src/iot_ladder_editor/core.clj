@@ -1,15 +1,9 @@
 (ns iot-ladder-editor.core
   (:require [cljfx.api :as fx]
-            [cljfx.prop :as fx.prop]
-            [cljfx.mutator :as fx.mutator]
-            [cljfx.lifecycle :as fx.lifecycle]
             [clojure.string :as str]
             [clojure.tools.logging :as log])
   (:import [javafx.scene.paint Color]
-           [javafx.scene.input KeyCode MouseButton TransferMode]
-           [javafx.scene.layout Priority]
-           [javafx.geometry Pos Insets]
-           [javafx.scene.control Alert$AlertType ButtonType]))
+           [javafx.scene.layout Priority]))
 
 ;; Application State
 (def *state
@@ -309,7 +303,7 @@
      :v-box/vgrow Priority/ALWAYS}]})
 
 ;; Main Layout
-(defn main-view [{:keys [instruction-palette-visible properties-panel-visible] :as state}]
+(defn main-view [{:keys [instruction-palette-visible properties-panel-visible] :as _state}]
   (try
     ;; Ensure we have boolean values, defaulting to true if nil
     (let [show-instruction-palette (if (nil? instruction-palette-visible) true (boolean instruction-palette-visible))
@@ -452,9 +446,9 @@
        "}\n"))
 
 ;; Event Handlers
-(defmulti handle-event (fn [event state] (:event/type event)))
+(defmulti handle-event (fn [event _state] (:event/type event)))
 
-(defmethod handle-event :new-project [event state]
+(defmethod handle-event :new-project [_event state]
   (assoc state
          :project-name "Untitled Project"
          :rungs []
@@ -462,10 +456,10 @@
          :selected-instruction nil
          :build-output ""))
 
-(defmethod handle-event :add-rung [event state]
+(defmethod handle-event :add-rung [_event state]
   (update state :rungs conj {:instructions []}))
 
-(defmethod handle-event :delete-rung [event state]
+(defmethod handle-event :delete-rung [_event state]
   (if-let [selected (:selected-rung state)]
     (-> state
         (update :rungs (fn [rungs] (vec (concat (take selected rungs)
@@ -494,24 +488,24 @@
 (defmethod handle-event :instruction-selected [event state]
   (assoc state :selected-instruction (:instruction event)))
 
-(defmethod handle-event :update-instruction-address [event state]
+(defmethod handle-event :update-instruction-address [_event state]
   ;; This would update the selected instruction's address
   ;; Implementation depends on how instructions are stored and referenced
   state)
 
-(defmethod handle-event :toggle-instruction-palette [event state]
+(defmethod handle-event :toggle-instruction-palette [_event state]
   (let [current (get state :instruction-palette-visible true)
         new-value (not (boolean current))]
     (log/debug "Toggling instruction palette:" current "->" new-value)
     (assoc state :instruction-palette-visible new-value)))
 
-(defmethod handle-event :toggle-properties-panel [event state]
+(defmethod handle-event :toggle-properties-panel [_event state]
   (let [current (get state :properties-panel-visible true)
         new-value (not (boolean current))]
     (log/debug "Toggling properties panel:" current "->" new-value)
     (assoc state :properties-panel-visible new-value)))
 
-(defmethod handle-event :build-project [event state]
+(defmethod handle-event :build-project [_event state]
   (let [arduino-code (generate-arduino-code (:rungs state))]
     (assoc state :build-output arduino-code)))
 
@@ -524,7 +518,7 @@
   state)
 
 ;; Handle nil events specifically to avoid NPEs
-(defmethod handle-event nil [event state]
+(defmethod handle-event nil [_event state]
   (log/warn "Received nil event - ignoring")
   state)
 
