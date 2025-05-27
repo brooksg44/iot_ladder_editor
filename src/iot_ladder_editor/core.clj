@@ -3,7 +3,8 @@
             [cljfx.prop :as fx.prop]
             [cljfx.mutator :as fx.mutator]
             [cljfx.lifecycle :as fx.lifecycle]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [clojure.tools.logging :as log])
   (:import [javafx.scene.paint Color]
            [javafx.scene.input KeyCode MouseButton TransferMode]
            [javafx.scene.layout Priority]
@@ -217,11 +218,11 @@
      :items
      [{:fx/type :check-menu-item
        :text "Instruction Palette"
-       :selected (:instruction-palette-visible @*state)
+       :selected (boolean (:instruction-palette-visible @*state))
        :on-action {:event/type :toggle-instruction-palette}}
       {:fx/type :check-menu-item
        :text "Properties Panel"
-       :selected (:properties-panel-visible @*state)
+       :selected (boolean (:properties-panel-visible @*state))
        :on-action {:event/type :toggle-properties-panel}}]}]})
 
 ;; Toolbar
@@ -251,33 +252,47 @@
 
 ;; Ladder Canvas
 (defn ladder-canvas []
-  (let [rungs (:rungs @*state)]
-    {:fx/type :scroll-pane
-     :fit-to-width true
-     :content
-     {:fx/type :pane
-      :pref-width 800
-      :pref-height (max 400 (* (count rungs) 100))
-      :style "-fx-background-color: white;"
-      :children
-      (map-indexed
-       (fn [index rung]
-         (draw-rung index rung (= index (:selected-rung @*state))))
-       rungs)}}))
+  (try
+    (let [rungs (or (:rungs @*state) [])]
+      {:fx/type :scroll-pane
+       :fit-to-width true
+       :content
+       {:fx/type :pane
+        :pref-width 800
+        :pref-height (max 400 (* (count rungs) 100))
+        :style "-fx-background-color: white;"
+        :children
+        (map-indexed
+         (fn [index rung]
+           (try
+             (draw-rung index rung (= index (:selected-rung @*state)))
+             (catch Exception e
+               (log/warn "Error rendering rung:" e)
+               {:fx/type :label
+                :text (str "Error rendering rung " index)
+                :style "-fx-text-fill: red;"})))
+         rungs)}})
+    (catch Exception e
+      (log/error "Error in ladder-canvas:" e)
+      {:fx/type :label
+       :text "Error rendering ladder canvas"
+       :style "-fx-text-fill: red;"})))
 
 ;; Status Bar
 (defn status-bar []
-  {:fx/type :h-box
-   :alignment :center-left
-   :spacing 10
-   :padding 5
-   :style "-fx-background-color: #f0f0f0; -fx-border-color: #cccccc;"
-   :children
-   [{:fx/type :label
-     :text (str "Project: " (:project-name @*state))}
-    {:fx/type :separator}
-    {:fx/type :label
-     :text (str "Rungs: " (count (:rungs @*state)))}]})
+  (let [project-name (or (:project-name @*state) "Untitled Project")
+        rungs (or (:rungs @*state) [])]
+    {:fx/type :h-box
+     :alignment :center-left
+     :spacing 10
+     :padding 5
+     :style "-fx-background-color: #f0f0f0; -fx-border-color: #cccccc;"
+     :children
+     [{:fx/type :label
+       :text (str "Project: " project-name)}
+      {:fx/type :separator}
+      {:fx/type :label
+       :text (str "Rungs: " (count rungs))}]}))
 
 ;; Build Output Panel
 (defn build-output-panel []
@@ -294,27 +309,67 @@
      :v-box/vgrow Priority/ALWAYS}]})
 
 ;; Main Layout
-(defn main-view [{:keys [instruction-palette-visible properties-panel-visible]}]
-  {:fx/type :stage
-   :showing true
-   :title "IoT Ladder Editor - Clojure"
-   :width 1200
-   :height 800
-   :scene
-   {:fx/type :scene
-    :root
-    {:fx/type :border-pane
-     :top {:fx/type :v-box
-           :children [(menu-bar) (toolbar)]}
-     :left (when instruction-palette-visible
-             (instruction-palette))
-     :center {:fx/type :split-pane
-              :orientation :vertical
-              :items [(ladder-canvas)
-                      (build-output-panel)]}
-     :right (when properties-panel-visible
-              (properties-panel))
-     :bottom (status-bar)}}})
+(defn main-view [{:keys [instruction-palette-visible properties-panel-visible] :as state}]
+  (try
+    ;; Ensure we have boolean values, defaulting to true if nil
+    (let [show-instruction-palette (if (nil? instruction-palette-visible) true (boolean instruction-palette-visible))
+          show-properties-panel (if (nil? properties-panel-visible) true (boolean properties-panel-visible))]
+      {:fx/type :stage
+       :showing true
+       :title "IoT Ladder Editor - Clojure"
+       :width 1200
+       :height 800
+       :scene
+       {:fx/type :scene
+        :root
+        {:fx/type :border-pane
+         :top {:fx/type :v-box
+               :children [(try (menu-bar)
+                               (catch Exception e
+                                 (log/error "Error in menu-bar:" e)
+                                 {:fx/type :label :text "Error in menu bar"}))
+                          (try (toolbar)
+                               (catch Exception e
+                                 (log/error "Error in toolbar:" e)
+                                 {:fx/type :label :text "Error in toolbar"}))]}
+         :left (when show-instruction-palette
+                 (try (instruction-palette)
+                      (catch Exception e
+                        (log/error "Error in instruction-palette:" e)
+                        {:fx/type :label :text "Error in instruction palette"})))
+         :center {:fx/type :split-pane
+                  :orientation :vertical
+                  :items [(try (ladder-canvas)
+                               (catch Exception e
+                                 (log/error "Error in ladder-canvas:" e)
+                                 {:fx/type :label :text "Error in ladder canvas"}))
+                          (try (build-output-panel)
+                               (catch Exception e
+                                 (log/error "Error in build-output-panel:" e)
+                                 {:fx/type :label :text "Error in build output panel"}))]}
+         :right (when show-properties-panel
+                  (try (properties-panel)
+                       (catch Exception e
+                         (log/error "Error in properties-panel:" e)
+                         {:fx/type :label :text "Error in properties panel"})))
+         :bottom (try (status-bar)
+                      (catch Exception e
+                        (log/error "Error in status-bar:" e)
+                        {:fx/type :label :text "Error in status bar"}))}}})
+    (catch Exception e
+      (log/error "Critical error in main-view:" e)
+      {:fx/type :stage
+       :showing true
+       :title "IoT Ladder Editor - ERROR"
+       :scene {:fx/type :scene
+               :root {:fx/type :v-box
+                      :padding 20
+                      :spacing 10
+                      :children [{:fx/type :label
+                                  :text "An error occurred in the application"
+                                  :style "-fx-font-weight: bold; -fx-text-fill: red;"}
+                                 {:fx/type :label
+                                  :text (str "Error: " (.getMessage e))}]}}})))
 
 ;; Arduino Code Generation
 (defn generate-rung-code [instructions]
@@ -445,31 +500,91 @@
   state)
 
 (defmethod handle-event :toggle-instruction-palette [event state]
-  (update state :instruction-palette-visible not))
+  (let [current (get state :instruction-palette-visible true)
+        new-value (not (boolean current))]
+    (log/debug "Toggling instruction palette:" current "->" new-value)
+    (assoc state :instruction-palette-visible new-value)))
 
 (defmethod handle-event :toggle-properties-panel [event state]
-  (update state :properties-panel-visible not))
+  (let [current (get state :properties-panel-visible true)
+        new-value (not (boolean current))]
+    (log/debug "Toggling properties panel:" current "->" new-value)
+    (assoc state :properties-panel-visible new-value)))
 
 (defmethod handle-event :build-project [event state]
   (let [arduino-code (generate-arduino-code (:rungs state))]
     (assoc state :build-output arduino-code)))
 
 (defmethod handle-event :default [event state]
-  (println "Unhandled event:" (:event/type event))
+  (log/warn "Unhandled event:"
+            (if (nil? event)
+              "nil"
+              (str "Type: " (:event/type event) " Content: " (pr-str event))))
+  ;; Return state unchanged for unhandled events
   state)
 
+;; Handle nil events specifically to avoid NPEs
+(defmethod handle-event nil [event state]
+  (log/warn "Received nil event - ignoring")
+  state)
+
+;; Global error handler for events
+(defn safe-handle-event [event state]
+  (try
+    (handle-event event state)
+    (catch Exception e
+      (log/error "Error handling event:" e
+                 "\nEvent:" (pr-str event))
+      ;; Return original state to avoid corrupting application state
+      state)))
 
 ;; Main Application
+(defn safe-render [state]
+  (try
+    (merge state {:fx/type main-view})
+    (catch Exception e
+      (log/error "Error in renderer:" e)
+      {:fx/type :stage
+       :showing true
+       :title "IoT Ladder Editor - ERROR"
+       :scene {:fx/type :scene
+               :root {:fx/type :v-box
+                      :padding 20
+                      :spacing 10
+                      :children [{:fx/type :label
+                                  :text "An error occurred in the application"
+                                  :style "-fx-font-weight: bold; -fx-text-fill: red;"}
+                                 {:fx/type :label
+                                  :text (str "Error: " (.getMessage e))}]}}})))
+
 (defn -main []
-  (fx/mount-renderer
-   *state
-   (fx/create-renderer
-    :middleware (fx/wrap-map-desc
-                 (fn [state]
-                   (merge state {:fx/type main-view})))
-    :opts {:fx.opt/map-event-handler
-           (fn [event]
-             (swap! *state handle-event event))})))
+  (try
+    ;; Initialize logging
+    (log/info "Starting IoT Ladder Editor")
+
+    ;; Ensure state has proper defaults before rendering
+    (when (nil? (:instruction-palette-visible @*state))
+      (swap! *state assoc :instruction-palette-visible true))
+    (when (nil? (:properties-panel-visible @*state))
+      (swap! *state assoc :properties-panel-visible true))
+
+    ;; Initialize with error handling
+    (fx/mount-renderer
+     *state
+     (fx/create-renderer
+      :middleware (fx/wrap-map-desc safe-render)
+      :opts {:fx.opt/map-event-handler
+             (fn [event]
+               (try
+                 ;; Only process events that aren't nil
+                 (if (nil? event)
+                   (log/warn "Warning: Received nil event in map-event-handler")
+                   (swap! *state safe-handle-event event))
+                 (catch Exception e
+                   (log/error "Error in map-event-handler:" e
+                              "\nEvent:" (pr-str event)))))}))
+    (catch Exception e
+      (log/error "Error initializing application:" e))))
 
 ;; For REPL development
 (comment
